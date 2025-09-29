@@ -2,12 +2,15 @@ import os
 import logging
 import asyncio
 from datetime import datetime
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.enums import ParseMode
-from config import API_ID, API_HASH, BOT_TOKEN, MAX_FILE_SIZE, SUPPORTED_FORMATS
+from pyrogram.errors import (
+    FloodWait, RPCError, FileReferenceExpired, 
+    FileIdInvalid, FilePartMissing, AuthKeyUnregistered
+)
+from config import API_ID, API_HASH, BOT_TOKEN, MAX_FILE_SIZE
 from database import Database
-from helpers import get_file_size, get_human_size, clean_downloads
+from helpers import get_human_size, clean_downloads
 
 # Configure logging
 logging.basicConfig(
@@ -16,16 +19,48 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = Client("rename_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client(
+    "rename_bot", 
+    api_id=API_ID, 
+    api_hash=API_HASH, 
+    bot_token=BOT_TOKEN,
+    sleep_threshold=60
+)
+
 db = Database()
+
+# Global error handler
+async def handle_error(func, *args, **kwargs):
+    try:
+        return await func(*args, **kwargs)
+    except FloodWait as e:
+        logger.warning(f"Flood wait: {e.value} seconds")
+        await asyncio.sleep(e.value + 5)
+        return await func(*args, **kwargs)
+    except (FileReferenceExpired, FileIdInvalid):
+        logger.error("File reference expired or invalid")
+        return None
+    except FilePartMissing as e:
+        logger.error(f"File part missing: {e}")
+        return None
+    except AuthKeyUnregistered:
+        logger.error("Auth key unregistered")
+        return None
+    except RPCError as e:
+        logger.error(f"RPC Error: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error in {func.__name__}: {e}")
+        return None
 
 # Start command
 @app.on_message(filters.command(["start"]))
 async def start_command(client, message: Message):
-    user_id = message.from_user.id
-    await db.add_user(user_id)
-    
-    welcome_text = """
+    try:
+        user_id = message.from_user.id
+        await db.add_user(user_id)
+        
+        welcome_text = """
 🤖 **Welcome to File Rename Bot**
 
 I can help you rename any file easily!
@@ -44,20 +79,28 @@ I can help you rename any file easily!
 
 **Supported formats:** Documents, Videos, Audio, Images
 **Max file size:** 2GB
-    """
-    
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📖 Help", callback_data="help"),
-         InlineKeyboardButton("ℹ️ About", callback_data="about")],
-        [InlineKeyboardButton("🔗 Support", url="https://t.me/your_channel")]
-    ])
-    
-    await message.reply_text(welcome_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        """
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📖 Help", callback_data="help"),
+             InlineKeyboardButton("ℹ️ About", callback_data="about")],
+            [InlineKeyboardButton("🔗 Support", url="https://t.me/your_channel")]
+        ])
+        
+        await message.reply_text(
+            welcome_text, 
+            reply_markup=keyboard, 
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        logger.error(f"Error in start command: {e}")
+        await message.reply_text("❌ An error occurred. Please try again.")
 
 # Help command
 @app.on_message(filters.command(["help"]))
 async def help_command(client, message: Message):
-    help_text = """
+    try:
+        help_text = """
 📖 **Help Guide**
 
 **Basic Usage:**
@@ -81,14 +124,17 @@ Method 2 - Caption:
 • ✅ Fast processing
 
 **Note:** File extension is automatically preserved.
-    """
-    
-    await message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+        """
+        
+        await message.reply_text(help_text, parse_mode=enums.ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Error in help command: {e}")
 
 # About command
 @app.on_message(filters.command(["about"]))
 async def about_command(client, message: Message):
-    about_text = """
+    try:
+        about_text = """
 ℹ️ **About This Bot**
 
 **File Rename Bot**
@@ -108,33 +154,38 @@ A powerful Telegram bot for renaming files with ease.
 
 **Developer:** @YourUsername
 **Version:** 2.0.0
-    """
-    
-    await message.reply_text(about_text, parse_mode=ParseMode.MARKDOWN)
+        """
+        
+        await message.reply_text(about_text, parse_mode=enums.ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Error in about command: {e}")
 
 # Stats command (Admin only)
 @app.on_message(filters.command(["stats"]))
 async def stats_command(client, message: Message):
-    user_id = message.from_user.id
-    
-    # Add your user ID here for admin access
-    if user_id != 123456789:  # Replace with your user ID
-        await message.reply_text("❌ This command is for admins only.")
-        return
-    
-    total_users = await db.get_total_users()
-    total_files = await db.get_total_files()
-    
-    stats_text = f"""
+    try:
+        user_id = message.from_user.id
+        
+        # Add your user ID here for admin access
+        if user_id != 123456789:  # Replace with your user ID
+            await message.reply_text("❌ This command is for admins only.")
+            return
+        
+        total_users = await db.get_total_users()
+        total_files = await db.get_total_files()
+        
+        stats_text = f"""
 📊 **Bot Statistics**
 
 **Users:** {total_users}
 **Files Processed:** {total_files}
 **Uptime:** Since {datetime.now().strftime('%Y-%m-%d')}
 **Status:** ✅ Running
-    """
-    
-    await message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
+        """
+        
+        await message.reply_text(stats_text, parse_mode=enums.ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Error in stats command: {e}")
 
 # Rename command handler
 @app.on_message(filters.command(["rename"]))
@@ -151,7 +202,10 @@ async def rename_command(client, message: Message):
             
             # Extract new filename
             if len(message.command) < 2:
-                await message.reply_text("❌ Please provide a new filename.\nExample: `/rename my_new_file`", parse_mode=ParseMode.MARKDOWN)
+                await message.reply_text(
+                    "❌ Please provide a new filename.\nExample: `/rename my_new_file`", 
+                    parse_mode=enums.ParseMode.MARKDOWN
+                )
                 return
             
             new_filename = " ".join(message.command[1:]).strip()
@@ -174,7 +228,10 @@ async def handle_caption_files(client, message: Message):
             # Extract new filename from caption
             parts = message.caption.split(" ", 1)
             if len(parts) < 2:
-                await message.reply_text("❌ Please provide a new filename.\nExample: `/rename my_new_file`", parse_mode=ParseMode.MARKDOWN)
+                await message.reply_text(
+                    "❌ Please provide a new filename.\nExample: `/rename my_new_file`", 
+                    parse_mode=enums.ParseMode.MARKDOWN
+                )
                 return
             
             new_filename = parts[1].strip()
@@ -182,10 +239,13 @@ async def handle_caption_files(client, message: Message):
             
     except Exception as e:
         logger.error(f"Error handling caption file: {e}")
-        await message.reply_text("❌ An error occurred while processing your file.")
 
 # Main file processing function
 async def process_file_rename(client, original_message, file_message, user_id, new_filename):
+    processing_msg = None
+    download_path = None
+    new_file_path = None
+    
     try:
         # Check if downloads directory exists
         if not os.path.exists("downloads"):
@@ -239,7 +299,12 @@ async def process_file_rename(client, original_message, file_message, user_id, n
         
         # Download file
         await processing_msg.edit_text("📥 Downloading file...")
-        download_path = await file_message.download(file_name=f"downloads/{user_id}_{original_name}")
+        
+        # Use error handler for download
+        download_path = await handle_error(
+            file_message.download, 
+            file_name=f"downloads/{user_id}_{original_name}"
+        )
         
         if not download_path:
             await processing_msg.edit_text("❌ Failed to download file.")
@@ -258,58 +323,73 @@ async def process_file_rename(client, original_message, file_message, user_id, n
         # Send renamed file
         await processing_msg.edit_text("📤 Uploading renamed file...")
         
-        # Send based on file type
+        # Send based on file type with error handling
         if file_type == "document":
-            await original_message.reply_document(
+            result = await handle_error(
+                original_message.reply_document,
                 document=new_file_path,
                 caption=caption,
-                parse_mode=ParseMode.MARKDOWN
+                parse_mode=enums.ParseMode.MARKDOWN
             )
         elif file_type == "video":
-            await original_message.reply_video(
+            result = await handle_error(
+                original_message.reply_video,
                 video=new_file_path,
                 caption=caption,
-                parse_mode=ParseMode.MARKDOWN
+                parse_mode=enums.ParseMode.MARKDOWN
             )
         elif file_type == "audio":
-            await original_message.reply_audio(
+            result = await handle_error(
+                original_message.reply_audio,
                 audio=new_file_path,
                 caption=caption,
-                parse_mode=ParseMode.MARKDOWN
+                parse_mode=enums.ParseMode.MARKDOWN
             )
         elif file_type == "photo":
-            await original_message.reply_photo(
+            result = await handle_error(
+                original_message.reply_photo,
                 photo=new_file_path,
                 caption=caption,
-                parse_mode=ParseMode.MARKDOWN
+                parse_mode=enums.ParseMode.MARKDOWN
             )
         
+        if not result:
+            await processing_msg.edit_text("❌ Failed to upload renamed file.")
+            return
+        
         # Clean up
-        await processing_msg.delete()
-        if os.path.exists(new_file_path):
-            os.remove(new_file_path)
+        if processing_msg:
+            await processing_msg.delete()
         
     except Exception as e:
         logger.error(f"Error processing file: {e}")
         try:
-            await processing_msg.edit_text("❌ An error occurred while processing your file.")
-        except:
-            await original_message.reply_text("❌ An error occurred while processing your file.")
+            if processing_msg:
+                await processing_msg.edit_text("❌ An error occurred while processing your file.")
+            else:
+                await original_message.reply_text("❌ An error occurred while processing your file.")
+        except Exception as edit_error:
+            logger.error(f"Error editing message: {edit_error}")
         
+    finally:
         # Clean up downloaded files
-        if 'download_path' in locals() and os.path.exists(download_path):
-            os.remove(download_path)
-        if 'new_file_path' in locals() and os.path.exists(new_file_path):
-            os.remove(new_file_path)
+        try:
+            if download_path and os.path.exists(download_path):
+                os.remove(download_path)
+            if new_file_path and os.path.exists(new_file_path):
+                os.remove(new_file_path)
+        except Exception as clean_error:
+            logger.error(f"Error cleaning files: {clean_error}")
 
 # Callback query handler
 @app.on_callback_query()
 async def handle_callbacks(client, callback_query):
-    data = callback_query.data
-    user_id = callback_query.from_user.id
-    
-    if data == "help":
-        help_text = """
+    try:
+        data = callback_query.data
+        user_id = callback_query.from_user.id
+        
+        if data == "help":
+            help_text = """
 📖 **Quick Help**
 
 **To rename a file:**
@@ -325,11 +405,11 @@ Send file with caption: `/rename new_name`
 • `/rename song_audio`
 
 The bot will automatically preserve the file extension.
-        """
-        await callback_query.message.edit_text(help_text, parse_mode=ParseMode.MARKDOWN)
-        
-    elif data == "about":
-        about_text = """
+            """
+            await callback_query.message.edit_text(help_text, parse_mode=enums.ParseMode.MARKDOWN)
+            
+        elif data == "about":
+            about_text = """
 🤖 **File Rename Bot**
 
 A simple and efficient bot for renaming files on Telegram.
@@ -341,29 +421,49 @@ A simple and efficient bot for renaming files on Telegram.
 • Easy to use
 
 **Developer:** @YourUsername
-        """
-        await callback_query.message.edit_text(about_text, parse_mode=ParseMode.MARKDOWN)
-    
-    await callback_query.answer()
-
-# Error handler
-@app.on_error()
-async def error_handler(client, update, error):
-    logger.error(f"Update {update} caused error: {error}")
+            """
+            await callback_query.message.edit_text(about_text, parse_mode=enums.ParseMode.MARKDOWN)
+        
+        await callback_query.answer()
+    except Exception as e:
+        logger.error(f"Error in callback handler: {e}")
 
 # Startup event
-@app.on_startup()
-async def startup_event():
-    await db.create_tables()
-    await clean_downloads()
-    logger.info("Bot started successfully!")
+@app.on_message(filters.command("start"))
+async def startup_handler(client, message: Message):
+    # This will trigger when bot starts and receives first start command
+    pass
 
-# Shutdown event
-@app.on_shutdown()
-async def shutdown_event():
-    await clean_downloads()
-    logger.info("Bot stopped!")
+# Initialize bot
+async def initialize_bot():
+    """Initialize bot components"""
+    try:
+        await db.create_tables()
+        await clean_downloads()
+        logger.info("Bot initialized successfully!")
+    except Exception as e:
+        logger.error(f"Error initializing bot: {e}")
 
 if __name__ == "__main__":
     print("🤖 Starting File Rename Bot...")
-    app.run()
+    
+    # Run initialization and start bot
+    async def main():
+        await initialize_bot()
+        await app.start()
+        print("✅ Bot started successfully!")
+        await asyncio.Event().wait()  # Run forever
+    
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n🛑 Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+    finally:
+        # Cleanup on exit
+        try:
+            asyncio.run(app.stop())
+            asyncio.run(clean_downloads())
+        except:
+            pass
