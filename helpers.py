@@ -37,7 +37,10 @@ async def clean_downloads():
             if os.path.isfile(file_path):
                 file_time = datetime.fromtimestamp(os.path.getctime(file_path))
                 if current_time - file_time > timedelta(hours=1):
-                    os.remove(file_path)
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
     except Exception as e:
         print(f"Error cleaning downloads: {e}")
 
