@@ -1,14 +1,16 @@
 import os
 import asyncio
 import logging
+import sys
 from dotenv import load_dotenv
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.enums import ParseMode
+from pyrogram.enums import ParseMode, MessageMediaType
 import aiofiles
 import json
 import time
 from datetime import datetime
+from typing import Union
 
 # Load environment variables
 load_dotenv()
@@ -32,11 +34,9 @@ THUMBNAIL_DB = "thumbnails.json"
 CAPTION_DB = "captions.json"
 USER_DB = "users.json"
 
-# Ensure storage files exist
-for file in [THUMBNAIL_DB, CAPTION_DB, USER_DB]:
-    if not os.path.exists(file):
-        with open(file, 'w') as f:
-            json.dump({}, f)
+# Ensure storage directories exist
+os.makedirs("downloads", exist_ok=True)
+os.makedirs("thumbnails", exist_ok=True)
 
 # Helper functions for data management
 def load_json(file_path):
@@ -88,11 +88,15 @@ async def start_command(client, message: Message):
         "• `/del_thumb` - Delete your thumbnail\n"
         "• `/set_caption` - Set custom caption\n"
         "• `/see_caption` - View your caption\n"
-        "• `/del_caption` - Delete your caption\n"
+        "• `/del_caption` - Delete custom caption\n"
         "• `/status` - Bot status (Admin)\n"
         "• `/broadcast` - Broadcast message (Admin)\n"
         "• `/restart` - Restart bot (Admin)\n\n"
-        "**Just send me any file to rename it!** 🚀",
+        "**To rename a file:**\n"
+        "1. Send any file (document, video, audio)\n"
+        "2. Reply to that file with `/rename new_filename.ext`\n\n"
+        "**Or use caption method:**\n"
+        "Send file with caption: `/rename new_filename.ext`",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("📢 Updates Channel", url="https://t.me/your_channel")],
             [InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/your_profile")]
@@ -111,7 +115,7 @@ async def view_thumbnail(client, message: Message):
     if thumbnail_file and os.path.exists(thumbnail_file):
         await message.reply_photo(thumbnail_file, caption="📸 **Your Current Thumbnail**")
     else:
-        await message.reply_text("❌ **No thumbnail found!**\nSend an image with `/set_thumb` to set one.")
+        await message.reply_text("❌ **No thumbnail found!**\nSend an image as photo to set thumbnail.")
 
 # Delete thumbnail
 @app.on_message(filters.command("del_thumb"))
@@ -130,17 +134,18 @@ async def delete_thumbnail(client, message: Message):
     else:
         await message.reply_text("❌ **No thumbnail found to delete!**")
 
-# Set thumbnail
+# Set thumbnail from photo
 @app.on_message(filters.photo & filters.private)
 async def set_thumbnail(client, message: Message):
     user_id = message.from_user.id
     update_user_activity(user_id)
     
+    # Check if this is meant to be a thumbnail
     if message.caption and "/set_thumb" in message.caption or not message.caption:
         # Download the photo
         thumb_path = f"thumbnails/{user_id}.jpg"
-        os.makedirs("thumbnails", exist_ok=True)
         
+        status_msg = await message.reply_text("📥 **Downloading thumbnail...**")
         await message.download(thumb_path)
         
         # Save to database
@@ -148,7 +153,7 @@ async def set_thumbnail(client, message: Message):
         thumbnails[str(user_id)] = thumb_path
         save_json(THUMBNAIL_DB, thumbnails)
         
-        await message.reply_text("✅ **Thumbnail set successfully!**")
+        await status_msg.edit_text("✅ **Thumbnail set successfully!**")
 
 # Set caption command
 @app.on_message(filters.command("set_caption"))
@@ -208,30 +213,75 @@ async def delete_caption(client, message: Message):
     else:
         await message.reply_text("❌ **No custom caption found to delete!**")
 
-# File processing handler
-@app.on_message(filters.document | filters.video | filters.audio | filters.voice | filters.animation)
-async def rename_file(client, message: Message):
+# Rename command (reply to a file)
+@app.on_message(filters.command("rename"))
+async def rename_command(client, message: Message):
     user_id = message.from_user.id
     update_user_activity(user_id)
     
-    # Ask for new file name if not in caption
-    if not message.caption or not message.caption.startswith("/rename"):
+    # Check if replying to a file
+    if not message.reply_to_message:
+        await message.reply_text(
+            "**Usage:**\n\n"
+            "**Method 1:** Reply to a file with `/rename new_filename.ext`\n"
+            "**Method 2:** Send file with caption `/rename new_filename.ext`\n\n"
+            "**Supported files:** Documents, Videos, Audio, Voice, Animation"
+        )
         return
     
+    replied_message = message.reply_to_message
+    
+    # Check if replied message contains a file
+    if not replied_message.media:
+        await message.reply_text("❌ **Please reply to a file (document, video, audio, etc.)**")
+        return
+    
+    await process_file_rename(client, message, replied_message)
+
+# File processing with caption method
+@app.on_message(
+    (filters.document | filters.video | filters.audio | filters.voice | filters.animation) &
+    filters.private &
+    filters.caption
+)
+async def rename_from_caption(client, message: Message):
+    user_id = message.from_user.id
+    update_user_activity(user_id)
+    
+    # Check if caption contains rename command
+    if message.caption and message.caption.startswith("/rename"):
+        await process_file_rename(client, message, message)
+
+async def process_file_rename(client, message: Message, target_message: Message):
+    user_id = message.from_user.id
+    
     try:
-        # Extract new file name from caption
-        parts = message.caption.split(" ", 1)
+        # Extract new file name
+        if message.text:
+            parts = message.text.split(" ", 1)
+        else:
+            parts = message.caption.split(" ", 1)
+            
         if len(parts) < 2:
-            await message.reply_text("**Usage:** Send file with caption: `/rename NewFileName.ext`")
+            await message.reply_text("❌ **Please provide a new file name!**\nExample: `/rename my_file.pdf`")
             return
         
         new_name = parts[1].strip()
+        
+        # Validate file name
+        if not new_name or len(new_name) > 255:
+            await message.reply_text("❌ **Invalid file name!** File name must be between 1-255 characters.")
+            return
         
         # Download status
         status_msg = await message.reply_text("📥 **Downloading file...**")
         
         # Download file
-        file_path = await message.download()
+        file_path = await target_message.download(file_name=f"downloads/{user_id}_{int(time.time())}")
+        
+        if not file_path:
+            await status_msg.edit_text("❌ **Failed to download file!**")
+            return
         
         await status_msg.edit_text("🔄 **Processing file...**")
         
@@ -243,10 +293,11 @@ async def rename_file(client, message: Message):
         user_caption = captions.get(str(user_id), "")
         
         if user_caption:
-            # Replace variables in caption
-            duration = getattr(message, 'duration', 0)
-            width = getattr(message, 'width', 0)
-            height = getattr(message, 'height', 0)
+            # Get file attributes
+            file_attr = target_message
+            duration = getattr(file_attr, 'duration', 0) or getattr(file_attr, 'video', file_attr).duration if hasattr(file_attr, 'video') else 0
+            width = getattr(file_attr, 'width', 0) or getattr(file_attr, 'video', file_attr).width if hasattr(file_attr, 'video') else 0
+            height = getattr(file_attr, 'height', 0) or getattr(file_attr, 'video', file_attr).height if hasattr(file_attr, 'video') else 0
             
             final_caption = user_caption.format(
                 filename=new_name,
@@ -262,44 +313,72 @@ async def rename_file(client, message: Message):
         thumbnails = load_json(THUMBNAIL_DB)
         thumbnail_path = thumbnails.get(str(user_id))
         
+        # Use original thumbnail if available and no custom thumbnail
+        if not thumbnail_path and hasattr(target_message, 'video') and target_message.video.thumbs:
+            thumb = target_message.video.thumbs[0]
+            thumbnail_path = await client.download_media(thumb.file_id, file_name=f"downloads/thumb_{user_id}.jpg")
+        
         await status_msg.edit_text("📤 **Uploading file...**")
         
         # Determine file type and send
-        if message.document:
-            await message.reply_document(
-                document=file_path,
-                file_name=new_name,
-                caption=final_caption,
-                thumb=thumbnail_path,
-                parse_mode=ParseMode.MARKDOWN
-            )
-        elif message.video:
-            await message.reply_video(
-                video=file_path,
-                file_name=new_name,
-                caption=final_caption,
-                thumb=thumbnail_path,
-                parse_mode=ParseMode.MARKDOWN
-            )
-        elif message.audio:
-            await message.reply_audio(
-                audio=file_path,
-                file_name=new_name,
-                caption=final_caption,
-                thumb=thumbnail_path,
-                parse_mode=ParseMode.MARKDOWN
-            )
-        
-        await status_msg.delete()
+        try:
+            if target_message.document:
+                await target_message.reply_document(
+                    document=file_path,
+                    file_name=new_name,
+                    caption=final_caption,
+                    thumb=thumbnail_path,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            elif target_message.video:
+                await target_message.reply_video(
+                    video=file_path,
+                    file_name=new_name,
+                    caption=final_caption,
+                    thumb=thumbnail_path,
+                    duration=target_message.video.duration,
+                    width=target_message.video.width,
+                    height=target_message.video.height,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            elif target_message.audio:
+                await target_message.reply_audio(
+                    audio=file_path,
+                    file_name=new_name,
+                    caption=final_caption,
+                    thumb=thumbnail_path,
+                    duration=target_message.audio.duration,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            elif target_message.voice:
+                await target_message.reply_voice(
+                    voice=file_path,
+                    caption=final_caption,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            elif target_message.animation:
+                await target_message.reply_animation(
+                    animation=file_path,
+                    caption=final_caption,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            
+            await status_msg.delete()
+            
+        except Exception as e:
+            await status_msg.edit_text(f"❌ **Upload Error:** {str(e)}")
         
         # Clean up downloaded file
         try:
-            os.remove(file_path)
+            if os.path.exists(file_path):
+                os.remove(file_path)
         except:
             pass
             
     except Exception as e:
-        await message.reply_text(f"❌ **Error:** {str(e)}")
+        error_msg = await message.reply_text(f"❌ **Error:** {str(e)}")
+        await asyncio.sleep(5)
+        await error_msg.delete()
 
 # Helper functions
 def format_size(size_bytes):
@@ -323,6 +402,25 @@ def format_duration(seconds):
     minutes = seconds // 60
     seconds = seconds % 60
     return f"{minutes:02d}:{seconds:02d}"
+
+# Help command
+@app.on_message(filters.command("help"))
+async def help_command(client, message: Message):
+    await message.reply_text(
+        "**🤖 File Rename Bot Help**\n\n"
+        "**How to rename files:**\n"
+        "1. **Reply Method:** Reply to any file with `/rename new_filename.ext`\n"
+        "2. **Caption Method:** Send file with caption `/rename new_filename.ext`\n\n"
+        "**Thumbnail Commands:**\n"
+        "• Send a photo to set as thumbnail\n"
+        "• `/view_thumb` - View your thumbnail\n"
+        "• `/del_thumb` - Delete thumbnail\n\n"
+        "**Caption Commands:**\n"
+        "• `/set_caption text` - Set custom caption\n"
+        "• `/see_caption` - View your caption\n"
+        "• `/del_caption` - Delete caption\n\n"
+        "**Supported Files:** Documents, Videos, Audio, Voice, GIFs"
+    )
 
 # Admin commands
 @app.on_message(filters.command("status"))
@@ -402,4 +500,5 @@ if __name__ == "__main__":
     print("🤖 Bot is starting...")
     # Create necessary directories
     os.makedirs("thumbnails", exist_ok=True)
+    os.makedirs("downloads", exist_ok=True)
     app.run()
