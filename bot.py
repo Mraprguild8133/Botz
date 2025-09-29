@@ -5,22 +5,17 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from pyrogram.errors import FloodWait
 import time
 import sys
+from config import Config
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
-try:
-    API_ID = int(os.environ.get("API_ID", "0"))
-    API_HASH = os.environ.get("API_HASH", "")
-    BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-    ADMIN_STRING = os.environ.get("ADMIN", "")
-    ADMINS = [int(admin_id) for admin_id in ADMIN_STRING.split()]
-except (ValueError, TypeError) as e:
-    logger.error(f"Error reading environment variables: {e}")
-    # You might want to exit or use default values if config is critical
-    sys.exit("Error: Environment variables are not set correctly.")
+API_ID = Config.API_ID
+API_HASH = Config.API_HASH
+BOT_TOKEN = Config.BOT_TOKEN
+ADMINS = Config.ADMINS
 
 
 # --- Bot Initialization ---
