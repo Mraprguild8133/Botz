@@ -1,17 +1,17 @@
-
-FROM python:3.11 
+FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt /app/
-
-RUN apt update && apt upgrade -y
-RUN apt install git python3-pip ffmpeg -y
-
+# Copy and install dependencies
 COPY . .
-
 RUN pip3 install -r requirements.txt
 
-COPY . /app
+# Copy app code
+COPY . .
 
-CMD python3 bot.py
+EXPOSE 5000
+
+# Health check
+HEALTHCHECK CMD curl -f http://localhost:5000/ || exit 1
+
+CMD ["python", "bot.py"]
