@@ -24,7 +24,7 @@ class Config(object):
     API_ID = int(os.environ.get("API_ID"))
     API_HASH = os.environ.get("API_HASH")
     BOT_TOKEN = os.environ.get("BOT_TOKEN")
-    SESSION_NAME = os.environ.get("SESSION_NAME", "Rename-Bot-0")
+    SESSION_NAME = os.environ.get("SESSION_NAME", "rename_bot.db")
     UPDATES_CHANNEL = os.environ.get("UPDATES_CHANNEL", None)
 
     # --- Text & Buttons ---
