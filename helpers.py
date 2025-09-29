@@ -1,56 +1,63 @@
+# (c) @AbirHasan2005
+
 import os
-import shutil
+import time
+import math
 import asyncio
-from datetime import datetime, timedelta
+from pyrogram.types import Message
+from config import DOWNLOAD_DIR, LOGGER
 
-def get_file_size(file_path):
-    """Get file size in bytes"""
-    try:
-        return os.path.getsize(file_path)
-    except:
-        return 0
+def get_media_from_message(message: Message):
+    media_ops = (
+        (message.video, "video"),
+        (message.document, "document"),
+        (message.audio, "audio")
+    )
+    for media, _ in media_ops:
+        if media:
+            return media
+    return None
 
-def get_human_size(size_bytes):
-    """Convert bytes to human readable format"""
-    if not size_bytes:
-        return "0 B"
-    
-    size_names = ["B", "KB", "MB", "GB", "TB"]
-    i = 0
-    while size_bytes >= 1024 and i < len(size_names) - 1:
-        size_bytes /= 1024.0
-        i += 1
-    
-    return f"{size_bytes:.2f} {size_names[i]}"
+def get_time(seconds: float) -> str:
+    seconds = int(seconds)
+    if seconds == 0:
+        return "0s"
+    time_str = ""
+    if seconds >= 86400:
+        time_str += f"{seconds // 86400}d "
+        seconds %= 86400
+    if seconds >= 3600:
+        time_str += f"{seconds // 3600}h "
+        seconds %= 3600
+    if seconds >= 60:
+        time_str += f"{seconds // 60}m "
+        seconds %= 60
+    if seconds > 0:
+        time_str += f"{seconds}s"
+    return time_str.strip()
 
-async def clean_downloads():
-    """Clean downloads directory"""
-    downloads_dir = "downloads"
-    if not os.path.exists(downloads_dir):
-        return
-    
-    try:
-        # Remove files older than 1 hour
-        current_time = datetime.now()
-        for filename in os.listdir(downloads_dir):
-            file_path = os.path.join(downloads_dir, filename)
-            if os.path.isfile(file_path):
-                file_time = datetime.fromtimestamp(os.path.getctime(file_path))
-                if current_time - file_time > timedelta(hours=1):
-                    try:
-                        os.remove(file_path)
-                    except:
-                        pass
-    except Exception as e:
-        print(f"Error cleaning downloads: {e}")
+def get_readable_bytes(size, precision=2):
+    if size is None or size <= 0:
+        return "0B"
+    suffixes = ["B", "KB", "MB", "GB", "TB"]
+    power = int(math.log(size, 1024))
+    return f"{round(size / (1024 ** power), precision)}{suffixes[power]}"
 
-def is_supported_format(filename):
-    """Check if file format is supported"""
-    _, ext = os.path.splitext(filename.lower())
-    return ext in [
-        '.pdf', '.txt', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-        '.zip', '.rar', '.7z', '.tar', '.gz',
-        '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp',
-        '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm',
-        '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac'
-                                                   ]
+def get_readable_time():
+    return time.strftime("%Hh %Mm %Ss")
+
+async def take_screen_shot(video_file, output_directory, ttl):
+    out_put_file_name = os.path.join(output_directory, f"{time.time()}.jpg")
+    file_gen_cmd = f"ffmpeg -ss {ttl} -i \"{video_file}\" -vframes 1 \"{out_put_file_name}\""
+    process = await asyncio.create_subprocess_shell(
+        file_gen_cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    e_response = stderr.decode().strip()
+    if e_response:
+        LOGGER.warning(f"ffmpeg stderr for screenshot: {e_response}")
+    if os.path.lexists(out_put_file_name):
+        return out_put_file_name
+    return None
