@@ -54,7 +54,7 @@ if not BOT_TOKEN or not API_ID or not API_HASH:
 
 if not STORAGE_CHANNEL:
     print("❌ STORAGE_CHANNEL not set in environment variables")
-    print("💡 Add STORAGE_CHANNEL=@mraprfile to .env file")
+    print("💡 Add STORAGE_CHANNEL=@your_channel_username to .env file")
     sys.exit(1)
 
 # Global tracking
