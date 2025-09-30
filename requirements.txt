@@ -1,3 +1,4 @@
+schedule>=1.2.2
 uvloop>=0.21.0
 pillow>=11.3.0
 psutil>=7.1.0
