@@ -35,7 +35,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_ID = int(os.getenv("API_ID", 0))
 API_HASH = os.getenv("API_HASH", "")
 # Channel configuration for storage
-STORAGE_CHANNEL = os.getenv("@mraprfile")  # Your channel username or ID
+STORAGE_CHANNEL = os.getenv("STORAGE_CHANNEL")  # Your channel username or ID
 
 # ULTRA SPEED SETTINGS
 MAX_FILE_SIZE = 4 * 1024 * 1024 * 1024  # 4GB
