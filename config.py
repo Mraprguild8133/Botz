@@ -15,6 +15,7 @@ class Config:
         API_ID = int(os.environ.get("API_ID"))
         API_HASH = os.environ.get("API_HASH")
         BOT_TOKEN = os.environ.get("BOT_TOKEN")
+        STORAGE_CHANNEL = os.environ.get("STORAGE_CHANNEL")
         ADMIN_STRING = os.environ.get("ADMIN", "6300568870")
         ADMINS = [int(admin_id) for admin_id in ADMIN_STRING.split()] if ADMIN_STRING else []
     except (ValueError, TypeError, AttributeError) as e:
